@@ -1,5 +1,5 @@
--- // TINTWARE | DELTA-POSITION V14 // --
--- // INSTANT TURN TRACKING | POSITION-BASED VELOCITY // --
+-- // TINTWARE | SENS-DOMINANT V15 // --
+-- // RAW VELOCITY MULTIPLIERS | DELTA TRACKING // --
 
 if getgenv().TintwareExecuted then
     getgenv().TintwareExecuted:Disconnect()
@@ -78,9 +78,7 @@ getgenv().TintwareExecuted = RS.Heartbeat:Connect(function(deltaTime)
         return
     end
 
-    -- // DELTA VELOCITY CALCULATION //
-    -- We calculate velocity manually based on position change since last frame
-    -- This is MUCH faster than AssemblyLinearVelocity for turns
+    -- // DELTA VELOCITY //
     if LastPosition ~= Vector3.new(0,0,0) then
         CalculatedVelocity = (targetPart.Position - LastPosition) / deltaTime
     end
@@ -89,14 +87,20 @@ getgenv().TintwareExecuted = RS.Heartbeat:Connect(function(deltaTime)
     local ping = getPing()
     local pBoost = ping * Config.PingScaling
     
-    -- Speed check for Dynamic Scaling
+    -- Dynamic Scaling for Regular vs Macro
     local speed = CalculatedVelocity.Magnitude
     local dynamicModifier = (speed < 35) and 0.88 or 1.0
     
-    -- // PREDICTION LOGIC //
-    local finalX = (CalculatedVelocity.X * Config.VelocitySensX) * (Config.PredX + pBoost) * dynamicModifier
-    local finalY = (CalculatedVelocity.Y * Config.VelocitySensY) * (Config.PredY + pBoost) * dynamicModifier
-    local finalZ = (CalculatedVelocity.Z * Config.VelocitySensZ) * (Config.PredZ + pBoost) * dynamicModifier
+    -- // IMPROVED SENS MATH //
+    -- We multiply the SENS against the VELOCITY first to make it hit harder
+    local rawX = CalculatedVelocity.X * Config.VelocitySensX
+    local rawY = CalculatedVelocity.Y * Config.VelocitySensY
+    local rawZ = CalculatedVelocity.Z * Config.VelocitySensZ
+    
+    -- Then apply the Prediction (Lead Time) and Ping
+    local finalX = rawX * (Config.PredX + pBoost) * dynamicModifier
+    local finalY = rawY * (Config.PredY + pBoost) * dynamicModifier
+    local finalZ = rawZ * (Config.PredZ + pBoost) * dynamicModifier
     
     local finalPred = Vector3.new(finalX, finalY, finalZ)
     
