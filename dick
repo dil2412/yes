@@ -1,10 +1,10 @@
--- // TINTWARE | DYNAMIC ENGINE UPGRADE // --
+-- // TINTWARE | RE-INJECTION SUPPORTED // --
 
 -- // SCRIPT KILLER (Prevents Interference) //
 if getgenv().TintwareExecuted then
-    getgenv().TintwareExecuted:Disconnect()
+    getgenv().TintwareExecuted:Disconnect() -- Kills old Heartbeat
     if getgenv().TintwareInput then
-        getgenv().TintwareInput:Disconnect()
+        getgenv().TintwareInput:Disconnect() -- Kills old Keybind
     end
 end
 
@@ -17,32 +17,50 @@ local Client = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 local MainEvent = game:GetService("ReplicatedStorage"):WaitForChild("MAINEVENT")
 
--- // PREDICTION CACHE //
-local LastVelocity = Vector3.new(0, 0, 0)
-
--- // NOTIFICATION HELPER //
-local function notify(text)
-    pcall(function()
-        StarterGui:SetCore("SendNotification", {
-            Title = "TINTWARE V2", 
-            Text = text, 
-            Duration = 2
-        })
-    end)
-end
+-- // STARTUP NOTIFICATION //
+task.spawn(function()
+    local success = false
+    while not success do
+        success = pcall(function()
+            StarterGui:SetCore("SendNotification", {
+                Title = "TINTWARE",
+                Text = "made by tint392 on discord",
+                Duration = 100
+            })
+        end)
+        task.wait(1)
+    end
+end)
 
 local LockedPlayer = nil
 local Tracer = Drawing.new("Line")
 Tracer.Thickness = 1.5
 Tracer.Visible = false
 
--- // DYNAMIC PING CALCULATION //
 local function getPing()
     local pingValue = Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
-    return (pingValue / 1000) -- Convert ms to seconds
+    return (tonumber(pingValue) or 0)
 end
 
--- // VISIBILITY CHECK //
+local function notify(text)
+    pcall(function()
+        StarterGui:SetCore("SendNotification", {
+            Title = "TINTWARE | TESTING |", 
+            Text = text, 
+            Duration = 2
+        })
+    end)
+end
+
+-- // AUTO-UNLOCK //
+Players.PlayerRemoving:Connect(function(player)
+    if LockedPlayer == player then
+        LockedPlayer = nil
+        getgenv().HyperConfig.Enabled = false
+        Tracer.Visible = false
+    end
+end)
+
 local function isVisible(part)
     if not part or not part.Parent then return false end
     local char = Client.Character
@@ -52,30 +70,6 @@ local function isVisible(part)
     params.FilterDescendantsInstances = {char, part.Parent}
     local ray = workspace:Raycast(Camera.CFrame.Position, part.Position - Camera.CFrame.Position, params)
     return ray == nil
-end
-
--- // THE BRAINS: DYNAMIC PREDICTION //
-local function GetSmartPrediction(targetPart, config)
-    local currentVelocity = targetPart.AssemblyLinearVelocity
-    local ping = getPing()
-    
-    -- Calculate Acceleration (Delta Velocity)
-    local acceleration = (currentVelocity - LastVelocity)
-    LastVelocity = currentVelocity
-    
-    -- Prediction Time = (Ping + System Latency) * Sensitivity
-    -- We add a small buffer for the remote event travel time
-    local predictionTime = (ping + config.PredictionVelocity) 
-    
-    -- Physics Equation: Position + (Velocity * Time) + (0.5 * Acceleration * Time^2)
-    local prediction = (currentVelocity * predictionTime) + (0.5 * acceleration * (predictionTime ^ 2))
-    
-    -- Gravity Compensation (If they are in the air, predict the fall)
-    if currentVelocity.Y ~= 0 then
-        prediction = prediction + Vector3.new(0, (workspace.Gravity * 0.5 * (predictionTime ^ 2)), 0)
-    end
-    
-    return prediction
 end
 
 -- // MAIN HEARTBEAT //
@@ -95,18 +89,24 @@ getgenv().TintwareExecuted = RS.Heartbeat:Connect(function()
         return
     end
 
-    -- Get Smart Prediction
-    local dynamicPred = GetSmartPrediction(targetPart, Config)
+    local velocity = targetPart.AssemblyLinearVelocity
+    local ping = getPing()
+    local pBoost = ping * Config.PingScaling
     
-    -- Clamp for safety
-    if dynamicPred.Magnitude > Config.MaxPredictionClamp then
-        dynamicPred = dynamicPred.Unit * Config.MaxPredictionClamp
+    local finalX = (velocity.X * Config.VelocitySensX) * (Config.PredX + pBoost)
+    local finalY = (velocity.Y * Config.VelocitySensY) * (Config.PredY + pBoost)
+    local finalZ = (velocity.Z * Config.VelocitySensZ) * (Config.PredZ + pBoost)
+    
+    local rawPred = Vector3.new(finalX, finalY, finalZ)
+    local finalPred = rawPred
+    
+    if rawPred.Magnitude > Config.MaxPredictionClamp then
+        finalPred = rawPred.Unit * Config.MaxPredictionClamp
     end
 
-    local finalPos = targetPart.Position + dynamicPred + Vector3.new(0, Config.VerticalOffset, 0)
+    local finalPos = targetPart.Position + finalPred + Vector3.new(0, Config.VerticalOffset, 0)
     local tPos, tVis = Camera:WorldToViewportPoint(finalPos)
     
-    -- Update Tracer
     Tracer.Color = Config.TracerColor
     if tVis then
         Tracer.Visible = true
@@ -116,9 +116,12 @@ getgenv().TintwareExecuted = RS.Heartbeat:Connect(function()
         Tracer.Visible = false
     end
 
-    -- Auto-Fire / Remote Call
-    if isVisible(targetPart) then
-        MainEvent:FireServer("MOUSE", finalPos)
+    if isVisible(targetPart) and Config.TriggerBot then
+        local tool = Client.Character:FindFirstChildOfClass("Tool")
+        if tool and not tool:FindFirstChild("Safe") then
+            MainEvent:FireServer("MOUSE", finalPos)
+            tool:Activate()
+        end
     end
 end)
 
@@ -157,7 +160,9 @@ getgenv().TintwareInput = UIS.InputBegan:Connect(function(i, gpe)
             if closestPlayer then
                 LockedPlayer = closestPlayer
                 Config.Enabled = true
-                notify("Locked: " .. closestPlayer.DisplayName)
+                notify("Locked onto " .. closestPlayer.DisplayName)
+            else
+                notify("no nigga visible")
             end
         end
     end
