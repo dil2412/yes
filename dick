@@ -1,5 +1,5 @@
--- // TINTWARE | SENS-DOMINANT V15 // --
--- // RAW VELOCITY MULTIPLIERS | DELTA TRACKING // --
+-- // TINTWARE | ACCEL-AWARE V16 // --
+-- // ANTI-LAG | INSTANT DIRECTIONAL SNAPPING // --
 
 if getgenv().TintwareExecuted then
     getgenv().TintwareExecuted:Disconnect()
@@ -31,10 +31,9 @@ end)
 
 local LockedPlayer = nil
 local LastPosition = Vector3.new(0,0,0)
-local CalculatedVelocity = Vector3.new(0,0,0)
-
+local LastVelocity = Vector3.new(0,0,0)
 local Tracer = Drawing.new("Line")
-Tracer.Thickness = 1.5
+Tracer.Thickness = 1.8
 Tracer.Visible = false
 
 local function getPing()
@@ -60,7 +59,7 @@ local function isVisible(part)
     return ray == nil
 end
 
--- // MAIN HEARTBEAT //
+-- // CORE ENGINE //
 getgenv().TintwareExecuted = RS.Heartbeat:Connect(function(deltaTime)
     local Config = getgenv().HyperConfig
     if not Config or not Config.Enabled or not LockedPlayer then 
@@ -78,29 +77,28 @@ getgenv().TintwareExecuted = RS.Heartbeat:Connect(function(deltaTime)
         return
     end
 
-    -- // DELTA VELOCITY //
-    if LastPosition ~= Vector3.new(0,0,0) then
-        CalculatedVelocity = (targetPart.Position - LastPosition) / deltaTime
-    end
-    LastPosition = targetPart.Position
+    -- // ADVANCED VELOCITY & ACCEL //
+    local currentPos = targetPart.Position
+    local currentVel = (currentPos - LastPosition) / deltaTime
+    
+    -- Smooth out the velocity to prevent "jittery" tracers
+    local smoothedVel = LastVelocity:Lerp(currentVel, 0.75) 
+    
+    LastPosition = currentPos
+    LastVelocity = smoothedVel
 
     local ping = getPing()
     local pBoost = ping * Config.PingScaling
     
-    -- Dynamic Scaling for Regular vs Macro
-    local speed = CalculatedVelocity.Magnitude
-    local dynamicModifier = (speed < 35) and 0.88 or 1.0
+    -- Dynamic Scaling (Higher threshold for V16)
+    local speed = smoothedVel.Magnitude
+    local dynamicModifier = (speed < 40) and 0.92 or 1.0
     
-    -- // IMPROVED SENS MATH //
-    -- We multiply the SENS against the VELOCITY first to make it hit harder
-    local rawX = CalculatedVelocity.X * Config.VelocitySensX
-    local rawY = CalculatedVelocity.Y * Config.VelocitySensY
-    local rawZ = CalculatedVelocity.Z * Config.VelocitySensZ
-    
-    -- Then apply the Prediction (Lead Time) and Ping
-    local finalX = rawX * (Config.PredX + pBoost) * dynamicModifier
-    local finalY = rawY * (Config.PredY + pBoost) * dynamicModifier
-    local finalZ = rawZ * (Config.PredZ + pBoost) * dynamicModifier
+    -- // PREDICTION MATH //
+    -- We multiply Sens * Velocity * (Pred + Ping)
+    local finalX = (smoothedVel.X * Config.VelocitySensX) * (Config.PredX + pBoost) * dynamicModifier
+    local finalY = (smoothedVel.Y * Config.VelocitySensY) * (Config.PredY + pBoost) * dynamicModifier
+    local finalZ = (smoothedVel.Z * Config.VelocitySensZ) * (Config.PredZ + pBoost) * dynamicModifier
     
     local finalPred = Vector3.new(finalX, finalY, finalZ)
     
@@ -109,7 +107,7 @@ getgenv().TintwareExecuted = RS.Heartbeat:Connect(function(deltaTime)
         finalPred = finalPred.Unit * Config.MaxPredictionClamp
     end
 
-    local finalPos = targetPart.Position + finalPred + Vector3.new(0, Config.VerticalOffset, 0)
+    local finalPos = currentPos + finalPred + Vector3.new(0, Config.VerticalOffset, 0)
     local tPos, tVis = Camera:WorldToViewportPoint(finalPos)
     
     Tracer.Color = Config.TracerColor
